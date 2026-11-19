@@ -1,0 +1,176 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#17191d">
+<title>Gold Monitor</title>
+<style>
+* { box-sizing:border-box }
+body {
+  margin:0; padding:20px;
+  background:#17191d; color:#f5f0e5;
+  font-family:Arial,sans-serif;
+}
+main { max-width:480px; margin:auto }
+h1 { color:#e9c77f; letter-spacing:2px }
+.card {
+  background:#25272b; padding:18px;
+  border-radius:16px; margin:14px 0;
+}
+.rate { font-size:27px; color:#f2d38e }
+small { color:#aaa }
+button,select,input {
+  padding:13px; border-radius:10px;
+  border:1px solid #65583b;
+  background:#302c24; color:white;
+  font-size:15px;
+}
+button { cursor:pointer }
+select,input { width:100%; margin:8px 0 }
+.grid { display:grid; grid-template-columns:1fr 1fr; gap:12px }
+button.primary { width:100%; background:#a98542; color:#17191d }
+</style>
+</head>
+<body>
+<main>
+<h1>GOLD MONITOR</h1>
+<small>INDIA BULLION BENCHMARK · INR</small>
+
+<div class="grid">
+ <div class="card">
+  <small>24K GOLD / GRAM</small>
+  <div class="rate" id="rate24">—</div>
+ </div>
+ <div class="card">
+  <small>22K GOLD / GRAM</small>
+  <div class="rate" id="rate22">—</div>
+ </div>
+</div>
+
+<div class="card">
+ <h3>Select gold purity</h3>
+ <select id="purity">
+  <option value="999">24K (999)</option>
+  <option value="995">24K (995)</option>
+  <option value="916">22K (916)</option>
+  <option value="750">18K (750)</option>
+  <option value="585">14K (585)</option>
+ </select>
+ <small>Selected gold price per gram</small>
+ <div class="rate" id="selectedRate">—</div>
+ <button class="primary" onclick="refresh()">↻ Refresh price</button>
+ <p id="updated">Not updated yet</p>
+</div>
+
+<div class="card">
+ <h3>Gold value calculator</h3>
+ <label>Weight in grams</label>
+ <input id="weight" type="number" min="0" step="0.01" value="10">
+ <small>Estimated metal value</small>
+ <div class="rate" id="total">—</div>
+ <small>Excludes GST, making charges and other fees.</small>
+</div>
+
+<p><small id="status">Ready to connect to price source.</small></p>
+</main>
+
+<script>
+let rates = {};
+
+const money = n => new Intl.NumberFormat("en-IN", {
+  style:"currency", currency:"INR",
+  maximumFractionDigits:2
+}).format(n);
+
+function findRates(node, result={}) {
+  if (!node || typeof node !== "object") return result;
+
+  if (Array.isArray(node)) {
+    node.forEach(x => findRates(x,result));
+    return result;
+  }
+
+  const purity = String(node.purity || node.fineness || "");
+  if (["999","995","916","750","585"].includes(purity)) {
+    const price = node.pricePerGram ?? node.perGram ??
+                  node.price_per_gram ?? node.ratePerGram ??
+                  node.price ?? node.rate;
+    if (Number.isFinite(Number(price))) result[purity]=Number(price);
+  }
+
+  for (const [key,value] of Object.entries(node)) {
+    const match = key.match(/(?:gold)?(999|995|916|750|585)/i);
+    if (match) {
+      if (typeof value === "number" || typeof value === "string") {
+        if (Number.isFinite(Number(value))) result[match[1]]=Number(value);
+      } else if (value && typeof value === "object") {
+        const candidates = [
+          value.pricePerGram, value.perGram,
+          value.price_per_gram, value.ratePerGram,
+          value.price, value.rate
+        ];
+        const price = candidates.find(x =>
+          x !== undefined && Number.isFinite(Number(x))
+        );
+        if (price !== undefined) result[match[1]]=Number(price);
+      }
+    }
+    findRates(value,result);
+  }
+  return result;
+}
+
+function updateDisplay() {
+  const purity = document.getElementById("purity").value;
+  document.getElementById("rate24").textContent =
+    rates["999"] ? money(rates["999"]) : "—";
+  document.getElementById("rate22").textContent =
+    rates["916"] ? money(rates["916"]) : "—";
+
+  const price = rates[purity];
+  document.getElementById("selectedRate").textContent =
+    price ? money(price) : "Rate unavailable";
+
+  const weight = Number(document.getElementById("weight").value);
+  document.getElementById("total").textContent =
+    price && weight > 0 ? money(price * weight) : "—";
+}
+
+async function refresh() {
+  const status = document.getElementById("status");
+  status.textContent = "Fetching latest benchmark rates...";
+  try {
+    const response = await fetch(
+      "https://api.dharun.dev/v1/bullion"
+    );
+    if (!response.ok) throw new Error("API error");
+    const body = await response.json();
+
+    rates = findRates(body.data);
+    updateDisplay();
+
+    if (!Object.keys(rates).length) {
+      status.textContent =
+        "Price data received, but its field format needs mapping.";
+      console.log("API response:",body);
+      return;
+    }
+    status.textContent = "Benchmark rates loaded.";
+    document.getElementById("updated").textContent =
+      "Checked: " + new Date().toLocaleString("en-IN");
+  } catch(error) {
+    status.textContent =
+      "Could not load rates. Check internet or try again.";
+    console.error(error);
+  }
+}
+
+document.getElementById("purity").addEventListener("change",updateDisplay);
+document.getElementById("weight").addEventListener("input",updateDisplay);
+
+refresh();
+</script>
+</body>
+</html>
